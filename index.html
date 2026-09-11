@@ -6,6 +6,8 @@
 <title>供应链穿透测试平台 · 星宇股份跨国供应链</title>
 <script src="echarts.min.js"></script>
 <script src="xlsx.full.min.js"></script>
+<script src="pdf.min.js"></script>
+<script src="mammoth.browser.min.js"></script>
 <style>
 :root {
   --surface-1: #fcfcfb;
@@ -300,7 +302,13 @@ tr:hover td { background: var(--chip-bg); }
       <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:12px">
         <div>
           <div style="font-size:12px;font-weight:600;color:var(--ink-2);margin-bottom:4px">⑤ 合同 / 尽调文本（合同、审计报告、尽调材料全文）</div>
-          <textarea id="taDoc" rows="5" style="width:100%;font-family:ui-monospace,Consolas,monospace;font-size:12px;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--surface-1);color:var(--ink)" placeholder="在此粘贴合同 / 审计报告 / 尽调材料全文…"></textarea>
+          <div style="display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+            <label class="btn" style="cursor:pointer;padding:6px 12px;font-size:12px">上传 PDF/Word 材料
+              <input type="file" id="docFileInput" accept=".pdf,.docx,.doc,.txt" multiple style="display:none">
+            </label>
+            <span id="docUploadStatus" style="font-size:11px;color:var(--ink-3);align-self:center"></span>
+          </div>
+          <textarea id="taDoc" rows="5" style="width:100%;font-family:ui-monospace,Consolas,monospace;font-size:12px;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--surface-1);color:var(--ink)" placeholder="在此粘贴合同 / 审计报告 / 尽调材料全文，或点上方按钮上传 PDF/Word 自动提取…"></textarea>
         </div>
         <div>
           <div style="font-size:12px;font-weight:600;color:var(--ink-2);margin-bottom:4px">⑥ ESG 三支柱评分（系统根据材料自动打分）</div>
@@ -1439,7 +1447,91 @@ function runDocAnalyze() {
 }
 
 function bindDoc() {
-  // 文档穿透已整合进统一录入区，通过 runCheck 联动；此处保留空实现避免报错
+  // 文档穿透已整合进统一录入区，通过 runCheck 联动；
+  // 新增：上传 PDF/Word 材料，自动提取文字填入第⑤块尽调文本
+  const fi = document.getElementById('docFileInput');
+  if (fi) fi.addEventListener('change', e => handleDocUpload(Array.from(e.target.files)));
+}
+
+/* PDF/Word 材料上传：本地解析，提取文字填入 taDoc（数据不出设备） */
+async function handleDocUpload(files) {
+  if (!files || !files.length) return;
+  const status = document.getElementById('docUploadStatus');
+  const taDoc = document.getElementById('taDoc');
+  let combined = taDoc.value.trim();
+  let extractedCount = 0;
+
+  for (const f of files) {
+    const name = f.name || '';
+    const ext = (name.split('.').pop() || '').toLowerCase();
+    try {
+      if (status) status.textContent = '正在解析 ' + name + ' …';
+      let text = '';
+      if (ext === 'pdf') {
+        text = await extractPdfText(f);
+      } else if (ext === 'docx') {
+        text = await extractDocxText(f);
+      } else if (ext === 'txt' || ext === 'md' || ext === 'csv') {
+        text = await f.text();
+      } else {
+        if (status) status.textContent = '暂不支持 .' + ext + ' 格式（支持 pdf/docx/txt）';
+        continue;
+      }
+      if (text && text.trim()) {
+        if (combined) combined += '\n\n';
+        combined += '【文件：' + name + '】\n' + text.trim();
+        extractedCount++;
+      }
+    } catch (err) {
+      if (status) status.textContent = '解析 ' + name + ' 失败：' + err.message;
+    }
+  }
+
+  taDoc.value = combined;
+  if (status) {
+    status.textContent = extractedCount ? '✅ 已提取 ' + extractedCount + ' 个文件，文字已填入下方文本区' : '未提取到文字';
+  }
+}
+
+function extractPdfText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const data = new Uint8Array(reader.result);
+        const pdfjsLib = window.pdfjsLib;
+        if (!pdfjsLib) return reject(new Error('PDF 解析库未加载'));
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
+        const pdf = await pdfjsLib.getDocument({ data }).promise;
+        let full = '';
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          const pageText = content.items.map(it => it.str).join(' ');
+          full += pageText + '\n';
+        }
+        resolve(full.trim());
+      } catch (err) { reject(err); }
+    };
+    reader.onerror = () => reject(new Error('文件读取失败'));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function extractDocxText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const mammoth = window.mammoth;
+        if (!mammoth) return reject(new Error('Word 解析库未加载'));
+        const result = await mammoth.extractRawText({ arrayBuffer: reader.result });
+        resolve((result.value || '').trim());
+      } catch (err) { reject(err); }
+    };
+    reader.onerror = () => reject(new Error('文件读取失败'));
+    reader.readAsArrayBuffer(file);
+  });
 }
 
 /* ============ 人权合规 ============ */
