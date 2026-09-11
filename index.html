@@ -549,6 +549,61 @@ function bindCompanyName() {
   });
 }
 
+/* 常见上市公司名录（真实公开信息；用于从材料自动匹配股票代码与上市状态） */
+const LISTED_COMPANIES = [
+  { name: '比亚迪股份有限公司', alias: ['比亚迪', '比亚迪股份', 'BYD'], code: '002594.SZ / 1211.HK', exchange: 'HK', listed: true },
+  { name: '常州星宇车灯股份有限公司', alias: ['星宇股份', '星宇车灯'], code: '601799.SH', exchange: 'A', listed: true },
+  { name: '宁德时代新能源科技股份有限公司', alias: ['宁德时代', 'CATL'], code: '300750.SZ', exchange: 'A', listed: true },
+  { name: '贵州茅台酒股份有限公司', alias: ['贵州茅台', '茅台'], code: '600519.SH', exchange: 'A', listed: true },
+  { name: '中国平安保险(集团)股份有限公司', alias: ['中国平安', '平安集团'], code: '601318.SH / 2318.HK', exchange: 'HK', listed: true },
+  { name: '中国工商银行股份有限公司', alias: ['工商银行', '工行'], code: '601398.SH / 1398.HK', exchange: 'HK', listed: true },
+  { name: '腾讯控股有限公司', alias: ['腾讯控股', '腾讯', 'Tencent'], code: '0700.HK', exchange: 'HK', listed: true },
+  { name: '阿里巴巴集团控股有限公司', alias: ['阿里巴巴', '阿里', 'Alibaba'], code: '9988.HK / BABA', exchange: 'HK', listed: true },
+  { name: '赣锋锂业集团股份有限公司', alias: ['赣锋锂业'], code: '002460.SZ', exchange: 'A', listed: true },
+  { name: '天赐材料股份有限公司', alias: ['天赐材料'], code: '002709.SZ', exchange: 'A', listed: true },
+  { name: '多氟多新材料股份有限公司', alias: ['多氟多'], code: '002407.SZ', exchange: 'A', listed: true },
+];
+
+/* 从材料文本里自动识别企业名称，返回匹配到的公司（含股票代码/上市状态）或 null */
+function detectCompany(text) {
+  if (!text) return null;
+  // 按"全称优先、别名次之"匹配
+  for (const c of LISTED_COMPANIES) {
+    if (text.includes(c.name)) return c;
+  }
+  for (const c of LISTED_COMPANIES) {
+    for (const a of c.alias) {
+      if (text.includes(a)) return c;
+    }
+  }
+  return null;
+}
+
+/* 从所有已录入材料里识别企业名，并回填核心企业字段 + 顶栏 + 股票代码 + 上市状态 */
+function autoDetectCompany() {
+  const docText = (document.getElementById('taDoc') || {}).value || '';
+  const equityText = (document.getElementById('taEquity') || {}).value || '';
+  const all = equityText + '\n' + docText;
+  const c = detectCompany(all);
+  if (!c) return null;
+
+  // 回填顶栏企业名
+  const nameInput = document.getElementById('companyNameInput');
+  if (nameInput) nameInput.value = c.name;
+  // 回填核心企业字段
+  const coreName = document.getElementById('coreName');
+  const coreCode = document.getElementById('coreCode');
+  const coreListed = document.getElementById('coreListed');
+  if (coreName) coreName.value = c.name;
+  if (coreCode) coreCode.value = c.code;
+  if (coreListed && c.listed) coreListed.value = (c.exchange === 'HK') ? 'HK' : '';
+  // 更新股票代码展示
+  const codeSpan = document.getElementById('companyCodeSpan');
+  if (codeSpan) codeSpan.textContent = c.code;
+
+  return c;
+}
+
 const RISKS = [
   {
     id: 'R1', level: 'critical', levelName: '重大',
@@ -1260,6 +1315,10 @@ function runCheck() {
   STATE.equity = CHECK.equity;
   STATE.fund = CHECK.fund;
   STATE.trade = CHECK.trade;
+
+  // 自动从材料识别企业名，回填股票代码 + 上市状态
+  autoDetectCompany();
+
   // 读取核心企业基础字段
   STATE.core = {
     name: (document.getElementById('coreName') || {}).value || '常州星宇车灯股份有限公司',
@@ -1270,6 +1329,32 @@ function runCheck() {
   // ESG 评分改为「系统根据录入材料自动打分」，在 findings 计算完后调用 autoScoreESG
 
   const findings = [];
+
+  /* 0. 缺失材料风险提示：未提供对应材料时，在对应模块做风险提示 */
+  if (!CHECK.equity.length) {
+    findings.push({ level:'serious', levelName:'高度', cat:'材料缺失·股权',
+      desc:'未提供股权结构材料，无法完成股权穿透（实控人识别、代持、离岸、隐性关联）。',
+      path:'② 股权结构 → 材料缺失',
+      advise:'补充股权结构表，或上传含股权信息的 PDF/Word 材料。' });
+  }
+  if (!CHECK.fund.length) {
+    findings.push({ level:'serious', levelName:'高度', cat:'材料缺失·资金',
+      desc:'未提供资金流水材料，无法完成资金穿透（空转、回流、挪用识别）。',
+      path:'③ 资金流水 → 材料缺失',
+      advise:'补充资金流水，或上传含资金往来的 PDF/Word 材料。' });
+  }
+  if (!CHECK.trade.length) {
+    findings.push({ level:'serious', levelName:'高度', cat:'材料缺失·贸易',
+      desc:'未提供贸易单据材料，无法完成贸易穿透（三单匹配、虚假贸易识别）。',
+      path:'④ 贸易单据 → 材料缺失',
+      advise:'补充贸易单据，或上传含交易信息的 PDF/Word 材料。' });
+  }
+  if (!document.getElementById('taDoc').value.trim()) {
+    findings.push({ level:'warn', levelName:'中度', cat:'材料缺失·尽调文本',
+      desc:'未提供合同/尽调文本材料，人权合规扫描与 ESG 自动评分将不完整。',
+      path:'⑤ 尽调文本 → 材料缺失',
+      advise:'补充合同/审计报告/尽调报告文本。' });
+  }
 
   /* 1. 股权穿透：同一股东出现多次 → 隐性关联；境外=是 → 离岸/代持 */
   const holderCount = {};
