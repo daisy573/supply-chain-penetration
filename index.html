@@ -1211,11 +1211,23 @@ function downloadTemplate() {
 
 /* 文件导入 */
 function handleFiles(files) {
-  const reader = new FileReader();
+  if (!files || !files.length) return;
   let idx = 0;
   const next = () => {
-    if (idx >= files.length) { setStatus('文件导入完成，请点击「运行穿透检验」'); return; }
+    if (idx >= files.length) {
+      // 全部读完后：同步 STATE + 文本框，并自动跑穿透检验
+      STATE.equity = CHECK.equity;
+      STATE.fund = CHECK.fund;
+      STATE.trade = CHECK.trade;
+      document.getElementById('taEquity').value = CHECK.equity.map(r => r.join('\t')).join('\n');
+      document.getElementById('taFund').value = CHECK.fund.map(r => r.join('\t')).join('\n');
+      document.getElementById('taTrade').value = CHECK.trade.map(r => r.join('\t')).join('\n');
+      setStatus('✅ 文件导入完成：股权 ' + CHECK.equity.length + ' 行 / 资金 ' + CHECK.fund.length + ' 行 / 贸易 ' + CHECK.trade.length + ' 行，已自动运行穿透检验');
+      runCheck();
+      return;
+    }
     const f = files[idx++];
+    const reader = new FileReader();  // 每个文件独立 FileReader，避免共享覆盖
     reader.onload = e => {
       try {
         const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
@@ -1229,6 +1241,7 @@ function handleFiles(files) {
         next();
       } catch (err) { setStatus('导入失败：' + err.message); }
     };
+    reader.onerror = () => setStatus('文件读取失败：' + f.name);
     reader.readAsArrayBuffer(f);
   };
   next();
@@ -1526,9 +1539,70 @@ async function handleDocUpload(files) {
   }
 
   taDoc.value = combined;
-  if (status) {
-    status.textContent = extractedCount ? '✅ 已提取 ' + extractedCount + ' 个文件，文字已填入下方文本区' : '未提取到文字';
+  // 结构化解析：从提取的文字里自动识别资金流水/股权/贸易，填充三张表
+  const parsed = parseDocToTables(combined);
+  if (parsed.fund.length) {
+    CHECK.fund = parsed.fund;
+    document.getElementById('taFund').value = parsed.fund.map(r => r.join('\t')).join('\n');
   }
+  if (parsed.equity.length) {
+    CHECK.equity = parsed.equity;
+    document.getElementById('taEquity').value = parsed.equity.map(r => r.join('\t')).join('\n');
+  }
+  if (parsed.trade.length) {
+    CHECK.trade = parsed.trade;
+    document.getElementById('taTrade').value = parsed.trade.map(r => r.join('\t')).join('\n');
+  }
+  STATE.equity = CHECK.equity;
+  STATE.fund = CHECK.fund;
+  STATE.trade = CHECK.trade;
+
+  if (status) {
+    const parts = [];
+    if (extractedCount) parts.push('提取 ' + extractedCount + ' 个文件文字');
+    if (parsed.fund.length) parts.push('识别资金流水 ' + parsed.fund.length + ' 行');
+    if (parsed.equity.length) parts.push('识别股权 ' + parsed.equity.length + ' 行');
+    if (parsed.trade.length) parts.push('识别贸易 ' + parsed.trade.length + ' 行');
+    status.textContent = parts.length ? '✅ ' + parts.join('，') : '未提取到文字';
+  }
+  // 若识别出结构化数据，自动跑一次穿透检验
+  if (parsed.fund.length || parsed.equity.length || parsed.trade.length) {
+    setStatus('文档已解析，自动运行穿透检验…');
+    runCheck();
+  }
+}
+
+/* 从文档文字里解析结构化数据（资金流水 / 股权 / 贸易） */
+function parseDocToTables(text) {
+  const fund = [], equity = [], trade = [];
+  if (!text) return { fund, equity, trade };
+
+  // 资金流水：匹配 "付款方 → 收款方：金额：类型" 或 "A→B：数字" 等模式
+  const fundRe = /([一-龥A-Za-z0-9（）()·]+?)\s*[→\-—>:：]\s*([一-龥A-Za-z0-9（）()·]+?)\s*[：:]\s*(\d+(?:\.\d+)?)\s*(万|亿)?\s*(?:元)?\s*[：:·]?\s*([^\n]{0,20})/g;
+  let m;
+  while ((m = fundRe.exec(text)) !== null) {
+    const payer = m[1].trim(), payee = m[2].trim();
+    const amount = m[3], unit = m[4] || '万元', type = (m[5] || '').trim();
+    // 过滤明显不是资金流的（含"层/级/编号/持股"等表头词）
+    if (/层|级|编号|持股|主体|股东|序号/.test(payer + payee)) continue;
+    fund.push([payer, payee, amount + (unit === '亿' ? '0000' : ''), type || '货款']);
+  }
+
+  // 股权：匹配 "层级主体 股东 持股%" 这种（数字+名称+名称+数字%）
+  const eqRe = /(\d)\s*[．.、]?\s*([一-龥A-Za-z0-9（）()·]+?)\s*[：:]\s*([一-龥A-Za-z0-9（）()·]+?)\s*[，,、\s]+(\d+(?:\.\d+)?)\s*%/g;
+  let e;
+  while ((e = eqRe.exec(text)) !== null) {
+    equity.push([e[1], e[2].trim(), e[3].trim(), e[4], '否', '']);
+  }
+
+  // 贸易：匹配 "编号 / 供应商 / 1 / 1 / 0" 这类三单
+  const trRe = /(T-?\d+|交易\d+)\s*[\/，,、]\s*([一-龥A-Za-z0-9（）()·]+?)\s*[\/，,、]\s*([01])\s*[\/，,、]\s*([01])\s*[\/，,、]\s*([01])/g;
+  let t;
+  while ((t = trRe.exec(text)) !== null) {
+    trade.push([t[1], t[2].trim(), t[3], t[4], t[5]]);
+  }
+
+  return { fund, equity, trade };
 }
 
 function extractPdfText(file) {
