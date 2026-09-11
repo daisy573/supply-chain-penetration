@@ -518,7 +518,7 @@ const CORE = { name: '常州星宇车灯股份有限公司', short: '星宇股�
 /* 读取当前企业名称（顶栏输入框），全局联动核心企业名 */
 function getCompanyName() {
   const el = document.getElementById('companyNameInput');
-  return el && el.value.trim() ? el.value.trim() : CORE.name;
+  return el && el.value.trim() ? el.value.trim() : '';
 }
 /* 从企业全称推断简称：去掉常见公司后缀 */
 function getCompanyShort() {
@@ -580,10 +580,20 @@ const LISTED_COMPANIES = [
   { name: '多氟多新材料股份有限公司', alias: ['多氟多'], code: '002407.SZ', exchange: 'A', listed: true },
 ];
 
+/* 从材料文本里直接提取企业名称（正则匹配公司后缀） */
+function extractCompanyNameFromText(text) {
+  if (!text) return null;
+  // 优先匹配全称（含"股份有限公司/有限公司/集团"等）
+  const fullRe = /[一-龥A-Za-z0-9（）()·]{2,20}(?:股份有限公司|有限责任公司|有限公司|集团股份|集团公司)/;
+  const m = text.match(fullRe);
+  if (m) return m[0];
+  return null;
+}
+
 /* 从材料文本里自动识别企业名称，返回匹配到的公司（含股票代码/上市状态）或 null */
 function detectCompany(text) {
   if (!text) return null;
-  // 按"全称优先、别名次之"匹配
+  // 按"全称优先、别名次之"匹配名录
   for (const c of LISTED_COMPANIES) {
     if (text.includes(c.name)) return c;
   }
@@ -595,29 +605,49 @@ function detectCompany(text) {
   return null;
 }
 
-/* 从所有已录入材料里识别企业名，并回填核心企业字段 + 顶栏 + 股票代码 + 上市状态 */
+/* 从所有已录入材料里识别企业名，并回填核心企业字段 + 顶栏 + 股票代码 + 上市状态。
+   能读出来就填，读不出来就留空（由用户手动填），不再用默认值兜底。 */
 function autoDetectCompany() {
   const docText = (document.getElementById('taDoc') || {}).value || '';
   const equityText = (document.getElementById('taEquity') || {}).value || '';
   const all = equityText + '\n' + docText;
-  const c = detectCompany(all);
-  if (!c) return null;
 
-  // 回填顶栏企业名
+  // 1. 先匹配名录（拿股票代码 + 上市状态）
+  const matched = detectCompany(all);
+
+  // 2. 企业名：优先从材料直接提取，其次用名录匹配结果
+  let companyName = extractCompanyNameFromText(all);
+  if (!companyName && matched) companyName = matched.name;
+
+  // 3. 回填顶栏 + 核心企业字段（读不出就置空，提示手动填）
   const nameInput = document.getElementById('companyNameInput');
-  if (nameInput) nameInput.value = c.name;
-  // 回填核心企业字段
   const coreName = document.getElementById('coreName');
   const coreCode = document.getElementById('coreCode');
   const coreListed = document.getElementById('coreListed');
-  if (coreName) coreName.value = c.name;
-  if (coreCode) coreCode.value = c.code;
-  if (coreListed && c.listed) coreListed.value = (c.exchange === 'HK') ? 'HK' : '';
-  // 更新股票代码展示
   const codeSpan = document.getElementById('companyCodeSpan');
-  if (codeSpan) codeSpan.textContent = c.code;
 
-  return c;
+  if (companyName) {
+    if (nameInput) nameInput.value = companyName;
+    if (coreName) coreName.value = companyName;
+  } else {
+    // 读不出企业名，清空并标记需手动填写
+    if (nameInput && !nameInput.value.trim()) nameInput.value = '';
+    if (coreName && !coreName.value.trim()) coreName.value = '';
+  }
+
+  // 4. 股票代码 + 上市状态：名录匹配到才填，否则留空
+  if (matched) {
+    if (coreCode) coreCode.value = matched.code;
+    if (coreListed && matched.listed) coreListed.value = (matched.exchange === 'HK') ? 'HK' : (matched.exchange === 'A' ? '' : '');
+    if (codeSpan) codeSpan.textContent = matched.code;
+  } else {
+    // 匹配不到名录，股票代码留空（用户手动填）
+    if (coreCode) coreCode.value = '';
+    if (coreListed) coreListed.value = '';
+    if (codeSpan) codeSpan.textContent = '';
+  }
+
+  return { name: companyName, code: matched ? matched.code : '', listed: matched ? (matched.exchange === 'HK' ? 'HK' : '') : '' };
 }
 
 const RISKS = [
@@ -1139,7 +1169,7 @@ function reportText() {
   let s = '';
   s += '供应链穿透测试报告\n';
   s += '＝'.repeat(40) + '\n\n';
-  s += '受测对象：' + getCompanyName() + '（' + getCompanyShort() + '，' + CORE.code + '）\n';
+  s += '受测对象：' + (getCompanyName() || '（未识别企业名称）') + '（' + ((document.getElementById('coreCode') && document.getElementById('coreCode').value) || '代码待填') + '）\n';
   s += '供应链范围：跨国汽车车灯供应链（国内 + 墨西哥 / 欧洲子公司）\n';
   s += '测试日期：' + date + '\n';
   s += '测试方法：全级次穿透 · 全链条穿透 · 全过程穿透 · 全要素穿透\n\n';
@@ -1172,7 +1202,7 @@ function render_report() {
   const warn = list.filter(r=>r.level==='warn').length;
   const body = document.getElementById('report-body');
   let html = '<h2 style="font-size:20px">供应链穿透测试报告</h2>';
-  html += '<div class="meta">受测对象：' + getCompanyName() + '（' + CORE.code + '）｜跨国供应链<br>测试日期：'+date+'｜测试方法：全级次·全链条·全过程·全要素穿透</div>';
+  html += '<div class="meta">受测对象：' + (getCompanyName() || '（未识别企业名称）') + '（' + ((document.getElementById('coreCode') && document.getElementById('coreCode').value) || '代码待填') + '）｜跨国供应链<br>测试日期：'+date+'｜测试方法：全级次·全链条·全过程·全要素穿透</div>';
   html += '<h4>一、测试结论</h4>';
   html += '<p>本次穿透测试共命中风险点 <b>'+list.length+'</b> 项，其中<span class="badge critical"><span class="dot"></span>重大 '+critical+'</span>　<span class="badge serious"><span class="dot"></span>高度 '+serious+'</span>　<span class="badge warn"><span class="dot"></span>中度 '+warn+'</span>。</p>';
   html += '<p>核心结论：供应链在关联交易、资金空转、虚假贸易等环节存在实质性风险敞口，建议立即启动整改并升级供应商准入与资金流向的穿透式监控。</p>';
@@ -1332,13 +1362,13 @@ function runCheck() {
   STATE.trade = CHECK.trade;
 
   // 自动从材料识别企业名，回填股票代码 + 上市状态
-  autoDetectCompany();
+  const detected = autoDetectCompany();
   // 刷新所有含企业名的 UI 文案
   refreshCompanyLabels();
 
-  // 读取核心企业基础字段
+  // 读取核心企业基础字段（读不出来就留空，不用默认值兜底）
   STATE.core = {
-    name: (document.getElementById('coreName') || {}).value || '常州星宇车灯股份有限公司',
+    name: (document.getElementById('coreName') || {}).value || '',
     code: (document.getElementById('coreCode') || {}).value || '',
     industry: (document.getElementById('coreIndustry') || {}).value || '',
     listed: (document.getElementById('coreListed') || {}).value || '',
@@ -1346,6 +1376,21 @@ function runCheck() {
   // ESG 评分改为「系统根据录入材料自动打分」，在 findings 计算完后调用 autoScoreESG
 
   const findings = [];
+
+  /* 0a. 企业名称未识别：提示手动填写 */
+  if (!STATE.core.name) {
+    findings.push({ level:'warn', levelName:'中度', cat:'信息缺失·企业名称',
+      desc:'未能从材料中识别企业名称，请在上方「核心企业」输入框手动填写企业全称。',
+      path:'① 核心企业基础 → 企业名称缺失',
+      advise:'在顶栏或「① 企业名称」输入框填写企业全称。' });
+  }
+  /* 0b. 股票代码未识别：提示手动填写 */
+  if (!STATE.core.code) {
+    findings.push({ level:'warn', levelName:'中度', cat:'信息缺失·股票代码',
+      desc:'未能从材料中识别股票代码（企业不在内置名录中），请手动填写股票代码与上市状态。',
+      path:'① 核心企业基础 → 股票代码缺失',
+      advise:'在「股票代码」输入框手动填写；上市状态在下拉框选择。' });
+  }
 
   /* 0. 缺失材料风险提示：未提供对应材料时，在对应模块做风险提示 */
   if (!CHECK.equity.length) {
