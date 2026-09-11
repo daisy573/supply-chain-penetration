@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>供应链穿透测试平台 · 星宇股份跨国供应链</title>
+<title>供应链穿透测试平台</title>
 <script src="echarts.min.js"></script>
 <script src="xlsx.full.min.js"></script>
 <script src="pdf.min.js"></script>
@@ -206,7 +206,7 @@ tr:hover td { background: var(--chip-bg); }
   <section class="view active" id="view-dashboard">
     <div class="section-head">
       <h2>穿透测试驾驶舱</h2>
-      <p>对星宇股份跨国供应链实施「全级次 · 全链条 · 全过程 · 全要素」穿透式监管的实时总览</p>
+      <p id="dashSubtitle">对核心企业跨国供应链实施「全级次 · 全链条 · 全过程 · 全要素」穿透式监管的实时总览</p>
     </div>
     <div class="grid kpi" style="margin-bottom:16px">
       <div class="card"><div class="value tabular" id="kpi-supplier">31</div><div class="label">供应链节点（供应商/子公司）</div><div class="delta warn" id="kpi-supplier-d">穿透 4 级 11 个法人层级</div></div>
@@ -485,7 +485,7 @@ tr:hover td { background: var(--chip-bg); }
     </div>
 
     <div class="card">
-      <h3>案卷四：星宇股份境外上市 · 用工争议 · 涉外合规 场景画像</h3>
+      <h3 id="case4Title">案卷四：核心企业境外上市 · 用工争议 · 涉外合规 场景画像</h3>
       <p style="font-size:13px;color:var(--ink-2);margin-bottom:12px">汽车核心零部件企业推进港交所主板上市期间，遭跨国整车厂依据德国 LkSG 发起突击审计，同时塞尔维亚工厂面临境外劳工人权质疑与资本市场 ESG 穿透披露审查。</p>
       <div class="method-steps">
         <div class="step"><div class="n">E</div><b>环境穿透</b><p>塞尔维亚工厂碳排放、能源结构、环境处罚未纳入披露</p></div>
@@ -538,11 +538,27 @@ function relabelCompany(text) {
   t = t.split('星宇股份').join(getCompanyShort());
   return t;
 }
+/* 统一刷新所有含企业名的 UI 文案 */
+function refreshCompanyLabels() {
+  const short = getCompanyShort();
+  const name = getCompanyName();
+  // 驾驶舱副标题
+  const sub = document.getElementById('dashSubtitle');
+  if (sub) sub.textContent = '对' + short + '跨国供应链实施「全级次 · 全链条 · 全过程 · 全要素」穿透式监管的实时总览';
+  // 案卷四标题
+  const c4 = document.getElementById('case4Title');
+  if (c4) c4.textContent = '案卷四：' + short + '境外上市 · 用工争议 · 涉外合规 场景画像';
+  // 顶栏股票代码
+  const codeSpan = document.getElementById('companyCodeSpan');
+  if (codeSpan && STATE.core && STATE.core.code) codeSpan.textContent = STATE.core.code;
+}
+
 /* 顶栏企业名输入框：改完重绘全景图 + 报告 */
 function bindCompanyName() {
   const el = document.getElementById('companyNameInput');
   if (!el) return;
   el.addEventListener('change', () => {
+    refreshCompanyLabels();
     render_dashboard_graph();
     // 若有已渲染的报告，刷新
     if (rendered['report']) render_report();
@@ -692,6 +708,7 @@ function buildEquityGraph() {
     ['4','香港H1','深圳芯微半导体','100','是',''],['5','BVI壳公司','香港H1','100','是',''],
     ['6','开曼SPV','BVI壳公司','100','是',''],['7','境内自然人张X','开曼SPV','100','否','代持'],
   ];
+  // 演示数据保持星宇示例，不做企业名替换
   const nodeMap = new Map();
   const links = [];
   rows.forEach(r => {
@@ -744,6 +761,7 @@ function buildFundSankey() {
     ['常州晶裕商贸','星宇关联主体','320','货款'],['苏州铭悦注塑','昆山恒泰塑胶','2100','货款'],
     ['无锡华辰电子','苏州朗普电子','1500','货款'],
   ];
+  // 演示数据保持星宇示例，不做企业名替换
   const nodeSet = new Set();
   rows.forEach(r => { if (r[0]) nodeSet.add(r[0]); if (r[1]) nodeSet.add(r[1]); });
   const nodes = Array.from(nodeSet).map(n => ({ name: n }));
@@ -1093,7 +1111,7 @@ function render_trade() {
 function render_risk() {
   const tb = document.getElementById('risk-table').querySelector('tbody');
   tb.innerHTML = '';
-  // 优先用真实检验结果，未检验时用内置演示数据
+  // 优先用真实检验结果，未检验时用内置演示数据（演示数据保持星宇示例）
   const list = STATE.findings.length ? STATE.findings : RISKS;
   list.forEach(r => {
     const tr = document.createElement('tr');
@@ -1238,10 +1256,7 @@ function loadSample() {
   CHECK.equity = SAMPLE.equity.slice(1);
   CHECK.fund = SAMPLE.fund.slice(1);
   CHECK.trade = SAMPLE.trade.slice(1);
-  // 把演示数据里的核心企业名替换为当前企业名
-  CHECK.equity = CHECK.equity.map(r => r.map(c => relabelCompany(c)));
-  CHECK.fund = CHECK.fund.map(r => r.map(c => relabelCompany(c)));
-  CHECK.trade = CHECK.trade.map(r => r.map(c => relabelCompany(c)));
+  // 演示数据保持星宇示例，不做企业名替换
   document.getElementById('taEquity').value = CHECK.equity.map(r => r.join('\t')).join('\n');
   document.getElementById('taFund').value = CHECK.fund.map(r => r.join('\t')).join('\n');
   document.getElementById('taTrade').value = CHECK.trade.map(r => r.join('\t')).join('\n');
@@ -1318,6 +1333,8 @@ function runCheck() {
 
   // 自动从材料识别企业名，回填股票代码 + 上市状态
   autoDetectCompany();
+  // 刷新所有含企业名的 UI 文案
+  refreshCompanyLabels();
 
   // 读取核心企业基础字段
   STATE.core = {
@@ -1989,17 +2006,17 @@ function renderEsgGaps() {
 
 /* 加载案卷四全套数据并跑穿透检验 */
 function loadCase4() {
-  CHECK.equity = CASE4.equity.slice(1).map(r => r.map(c => relabelCompany(c)));
-  CHECK.fund = CASE4.fund.slice(1).map(r => r.map(c => relabelCompany(c)));
-  CHECK.trade = CASE4.trade.slice(1).map(r => r.map(c => relabelCompany(c)));
+  CHECK.equity = CASE4.equity.slice(1);
+  CHECK.fund = CASE4.fund.slice(1);
+  CHECK.trade = CASE4.trade.slice(1);
   STATE.equity = CHECK.equity;
   STATE.fund = CHECK.fund;
   STATE.trade = CHECK.trade;
   document.getElementById('taEquity').value = CHECK.equity.map(r => r.join('\t')).join('\n');
   document.getElementById('taFund').value = CHECK.fund.map(r => r.join('\t')).join('\n');
   document.getElementById('taTrade').value = CHECK.trade.map(r => r.join('\t')).join('\n');
-  document.getElementById('taDoc').value = relabelCompany(CASE4.hr);
-  document.getElementById('taHr').value = relabelCompany(CASE4.hr);
+  document.getElementById('taDoc').value = CASE4.hr;
+  document.getElementById('taHr').value = CASE4.hr;
   // ESG 评分不再手动赋值，由 runCheck → autoScoreESG 自动计算
   runCheck();
   refreshEsgCharts();
