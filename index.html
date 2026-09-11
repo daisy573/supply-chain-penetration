@@ -185,7 +185,7 @@ tr:hover td { background: var(--chip-bg); }
     <div class="logo">穿</div>
     <div>
       <h1>供应链穿透测试平台</h1>
-      <div class="sub">核心企业：常州星宇车灯股份有限公司（601799.SH）· 跨国供应链</div>
+      <div class="sub">核心企业：<input id="companyNameInput" value="常州星宇车灯股份有限公司" style="width:220px;padding:2px 6px;font-size:11px;border:1px solid var(--border);border-radius:6px;background:var(--surface-1);color:var(--ink)" title="点击修改核心企业名称，全局联动">（<span id="companyCodeSpan">601799.SH</span>）· 跨国供应链</div>
     </div>
   </div>
   <nav class="tabs" id="tabs">
@@ -514,6 +514,40 @@ tr:hover td { background: var(--chip-bg); }
 <script>
 /* ============ 演示数据 ============ */
 const CORE = { name: '常州星宇车灯股份有限公司', short: '星宇股份', code: '601799.SH', rating: 'AA+' };
+
+/* 读取当前企业名称（顶栏输入框），全局联动核心企业名 */
+function getCompanyName() {
+  const el = document.getElementById('companyNameInput');
+  return el && el.value.trim() ? el.value.trim() : CORE.name;
+}
+/* 从企业全称推断简称：去掉常见公司后缀 */
+function getCompanyShort() {
+  const n = getCompanyName();
+  const suffixes = ['股份有限公司', '有限责任公司', '有限公司', '集团股份', '集团', '公司'];
+  for (const s of suffixes) {
+    if (n.endsWith(s)) return n.slice(0, -s.length);
+  }
+  return n;
+}
+/* 替换文本里的「星宇股份」「常州星宇车灯股份有限公司」为当前企业名称/简称 */
+function relabelCompany(text) {
+  if (!text) return text;
+  let t = text;
+  // 先替换全称，再替换简称（顺序很重要）
+  t = t.split('常州星宇车灯股份有限公司').join(getCompanyName());
+  t = t.split('星宇股份').join(getCompanyShort());
+  return t;
+}
+/* 顶栏企业名输入框：改完重绘全景图 + 报告 */
+function bindCompanyName() {
+  const el = document.getElementById('companyNameInput');
+  if (!el) return;
+  el.addEventListener('change', () => {
+    render_dashboard_graph();
+    // 若有已渲染的报告，刷新
+    if (rendered['report']) render_report();
+  });
+}
 
 const RISKS = [
   {
@@ -1032,7 +1066,7 @@ function reportText() {
   let s = '';
   s += '供应链穿透测试报告\n';
   s += '＝'.repeat(40) + '\n\n';
-  s += '受测对象：常州星宇车灯股份有限公司（星宇股份，601799.SH）\n';
+  s += '受测对象：' + getCompanyName() + '（' + getCompanyShort() + '，' + CORE.code + '）\n';
   s += '供应链范围：跨国汽车车灯供应链（国内 + 墨西哥 / 欧洲子公司）\n';
   s += '测试日期：' + date + '\n';
   s += '测试方法：全级次穿透 · 全链条穿透 · 全过程穿透 · 全要素穿透\n\n';
@@ -1065,7 +1099,7 @@ function render_report() {
   const warn = list.filter(r=>r.level==='warn').length;
   const body = document.getElementById('report-body');
   let html = '<h2 style="font-size:20px">供应链穿透测试报告</h2>';
-  html += '<div class="meta">受测对象：常州星宇车灯股份有限公司（601799.SH）｜跨国供应链<br>测试日期：'+date+'｜测试方法：全级次·全链条·全过程·全要素穿透</div>';
+  html += '<div class="meta">受测对象：' + getCompanyName() + '（' + CORE.code + '）｜跨国供应链<br>测试日期：'+date+'｜测试方法：全级次·全链条·全过程·全要素穿透</div>';
   html += '<h4>一、测试结论</h4>';
   html += '<p>本次穿透测试共命中风险点 <b>'+list.length+'</b> 项，其中<span class="badge critical"><span class="dot"></span>重大 '+critical+'</span>　<span class="badge serious"><span class="dot"></span>高度 '+serious+'</span>　<span class="badge warn"><span class="dot"></span>中度 '+warn+'</span>。</p>';
   html += '<p>核心结论：供应链在关联交易、资金空转、虚假贸易等环节存在实质性风险敞口，建议立即启动整改并升级供应商准入与资金流向的穿透式监控。</p>';
@@ -1149,9 +1183,13 @@ function loadSample() {
   CHECK.equity = SAMPLE.equity.slice(1);
   CHECK.fund = SAMPLE.fund.slice(1);
   CHECK.trade = SAMPLE.trade.slice(1);
-  document.getElementById('taEquity').value = SAMPLE.equity.map(r => r.join('\t')).join('\n');
-  document.getElementById('taFund').value = SAMPLE.fund.map(r => r.join('\t')).join('\n');
-  document.getElementById('taTrade').value = SAMPLE.trade.map(r => r.join('\t')).join('\n');
+  // 把演示数据里的核心企业名替换为当前企业名
+  CHECK.equity = CHECK.equity.map(r => r.map(c => relabelCompany(c)));
+  CHECK.fund = CHECK.fund.map(r => r.map(c => relabelCompany(c)));
+  CHECK.trade = CHECK.trade.map(r => r.map(c => relabelCompany(c)));
+  document.getElementById('taEquity').value = CHECK.equity.map(r => r.join('\t')).join('\n');
+  document.getElementById('taFund').value = CHECK.fund.map(r => r.join('\t')).join('\n');
+  document.getElementById('taTrade').value = CHECK.trade.map(r => r.join('\t')).join('\n');
   setStatus('已加载演练样例：股权 ' + CHECK.equity.length + ' 行 / 资金 ' + CHECK.fund.length + ' 行 / 贸易 ' + CHECK.trade.length + ' 行');
 }
 
@@ -1747,7 +1785,7 @@ function refreshEsgCharts() {
       type:'radar',
       data:[{
         value:[ESG_SCORE.E.score, ESG_SCORE.S.score, ESG_SCORE.G.score, disc, chain],
-        name:'星宇股份',
+        name: getCompanyName(),
         areaStyle:{ color:'rgba(42,120,214,0.25)' },
         lineStyle:{ color:'#2a78d6', width:2 },
         itemStyle:{ color:'#2a78d6' }
@@ -1792,17 +1830,17 @@ function renderEsgGaps() {
 
 /* 加载案卷四全套数据并跑穿透检验 */
 function loadCase4() {
-  CHECK.equity = CASE4.equity.slice(1);
-  CHECK.fund = CASE4.fund.slice(1);
-  CHECK.trade = CASE4.trade.slice(1);
+  CHECK.equity = CASE4.equity.slice(1).map(r => r.map(c => relabelCompany(c)));
+  CHECK.fund = CASE4.fund.slice(1).map(r => r.map(c => relabelCompany(c)));
+  CHECK.trade = CASE4.trade.slice(1).map(r => r.map(c => relabelCompany(c)));
   STATE.equity = CHECK.equity;
   STATE.fund = CHECK.fund;
   STATE.trade = CHECK.trade;
-  document.getElementById('taEquity').value = CASE4.equity.map(r => r.join('\t')).join('\n');
-  document.getElementById('taFund').value = CASE4.fund.map(r => r.join('\t')).join('\n');
-  document.getElementById('taTrade').value = CASE4.trade.map(r => r.join('\t')).join('\n');
-  document.getElementById('taDoc').value = CASE4.hr;
-  document.getElementById('taHr').value = CASE4.hr;
+  document.getElementById('taEquity').value = CHECK.equity.map(r => r.join('\t')).join('\n');
+  document.getElementById('taFund').value = CHECK.fund.map(r => r.join('\t')).join('\n');
+  document.getElementById('taTrade').value = CHECK.trade.map(r => r.join('\t')).join('\n');
+  document.getElementById('taDoc').value = relabelCompany(CASE4.hr);
+  document.getElementById('taHr').value = relabelCompany(CASE4.hr);
   // ESG 评分不再手动赋值，由 runCheck → autoScoreESG 自动计算
   runCheck();
   refreshEsgCharts();
@@ -1827,6 +1865,7 @@ bindCheck();
 bindDoc();
 bindHumanRights();
 bindEsg();
+bindCompanyName();
 
 /* 深链接支持：#run 加载样例并运行检验；#case4 加载案卷四全套 */
 (function handleHash() {
